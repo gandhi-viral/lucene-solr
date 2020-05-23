@@ -67,19 +67,24 @@ final class Lucene80DocValuesConsumer extends DocValuesConsumer implements Close
   IndexOutput data, meta;
   final int maxDoc;
   private final SegmentWriteState state;
+  private final Lucene80DocValuesFormat.Mode mode;
+  private final int version;
 
   /** expert: Creates a new writer */
-  public Lucene80DocValuesConsumer(SegmentWriteState state, String dataCodec, String dataExtension, String metaCodec, String metaExtension) throws IOException {
+  public Lucene80DocValuesConsumer(SegmentWriteState state, String dataCodec, String dataExtension, String metaCodec,
+                                   String metaExtension, Lucene80DocValuesFormat.Mode mode, int version) throws IOException {
     boolean success = false;
     try {
       this.state = state;
       String dataName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
       data = state.directory.createOutput(dataName, state.context);
-      CodecUtil.writeIndexHeader(data, dataCodec, Lucene80DocValuesFormat.VERSION_CURRENT, state.segmentInfo.getId(), state.segmentSuffix);
+      CodecUtil.writeIndexHeader(data, dataCodec, version, state.segmentInfo.getId(), state.segmentSuffix);
       String metaName = IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, metaExtension);
       meta = state.directory.createOutput(metaName, state.context);
-      CodecUtil.writeIndexHeader(meta, metaCodec, Lucene80DocValuesFormat.VERSION_CURRENT, state.segmentInfo.getId(), state.segmentSuffix);
+      CodecUtil.writeIndexHeader(meta, metaCodec, version, state.segmentInfo.getId(), state.segmentSuffix);
       maxDoc = state.segmentInfo.maxDoc();
+      this.mode = mode;
+      this.version = version;
       success = true;
     } finally {
       if (!success) {
@@ -378,7 +383,7 @@ final class Lucene80DocValuesConsumer extends DocValuesConsumer implements Close
       tempBinaryOffsets = state.directory.createTempOutput(state.segmentInfo.name, "binary_pointers", state.context);
       boolean success = false;
       try {
-        CodecUtil.writeHeader(tempBinaryOffsets, Lucene80DocValuesFormat.META_CODEC + "FilePointers", Lucene80DocValuesFormat.VERSION_CURRENT);
+        CodecUtil.writeHeader(tempBinaryOffsets, Lucene80DocValuesFormat.META_CODEC + "FilePointers", version);
         blockAddressesStart = data.getFilePointer();
         success = true;
       } finally {
@@ -457,8 +462,7 @@ final class Lucene80DocValuesConsumer extends DocValuesConsumer implements Close
       IOUtils.close(tempBinaryOffsets);             
       //write the compressed block offsets info to the meta file by reading from temp file
       try (ChecksumIndexInput filePointersIn = state.directory.openChecksumInput(tempBinaryOffsets.getName(), IOContext.READONCE)) {
-        CodecUtil.checkHeader(filePointersIn, Lucene80DocValuesFormat.META_CODEC + "FilePointers", Lucene80DocValuesFormat.VERSION_CURRENT,
-          Lucene80DocValuesFormat.VERSION_CURRENT);
+        CodecUtil.checkHeader(filePointersIn, Lucene80DocValuesFormat.META_CODEC + "FilePointers", version, version);
         Throwable priorE = null;
         try {
           final DirectMonotonicWriter filePointers = DirectMonotonicWriter.getInstance(meta, data, totalChunks, DIRECT_MONOTONIC_BLOCK_SHIFT);
@@ -490,14 +494,18 @@ final class Lucene80DocValuesConsumer extends DocValuesConsumer implements Close
     }
     
   }
-  
+
 
   @Override
   public void addBinaryField(FieldInfo field, DocValuesProducer valuesProducer) throws IOException {
     meta.writeInt(field.number);
     meta.writeByte(Lucene80DocValuesFormat.BINARY);
 
-    try (CompressedBinaryBlockWriter blockWriter = new CompressedBinaryBlockWriter()){
+    CompressedBinaryBlockWriter blockWriter = null;
+    try {
+      if (mode == Lucene80DocValuesFormat.Mode.COMPRESSED) {
+        blockWriter = new CompressedBinaryBlockWriter();
+      }
       BinaryDocValues values = valuesProducer.getBinary(field);
       long start = data.getFilePointer();
       meta.writeLong(start); // dataOffset
@@ -506,13 +514,19 @@ final class Lucene80DocValuesConsumer extends DocValuesConsumer implements Close
       int maxLength = 0;
       for (int doc = values.nextDoc(); doc != DocIdSetIterator.NO_MORE_DOCS; doc = values.nextDoc()) {
         numDocsWithField++;
-        BytesRef v = values.binaryValue();      
-        blockWriter.addDoc(doc, v);      
-        int length = v.length;      
+        BytesRef v = values.binaryValue();
+        int length = v.length;
+        if (blockWriter != null) {
+          blockWriter.addDoc(doc, v);
+        } else {
+          data.writeBytes(v.bytes, v.offset, v.length);
+        }
         minLength = Math.min(length, minLength);
         maxLength = Math.max(length, maxLength);
       }
-      blockWriter.flushData();
+      if (blockWriter != null) {
+        blockWriter.flushData();
+      }
 
       assert numDocsWithField <= maxDoc;
       meta.writeLong(data.getFilePointer() - start); // dataLength
@@ -539,12 +553,33 @@ final class Lucene80DocValuesConsumer extends DocValuesConsumer implements Close
 
       meta.writeInt(numDocsWithField);
       meta.writeInt(minLength);
-      meta.writeInt(maxLength);    
-      
-      blockWriter.writeMetaData();
-      
-    }
+      meta.writeInt(maxLength);
 
+      if (blockWriter != null) {
+        blockWriter.writeMetaData();
+      } else {
+        if (maxLength > minLength) {
+          start = data.getFilePointer();
+          meta.writeLong(start);
+          meta.writeVInt(DIRECT_MONOTONIC_BLOCK_SHIFT);
+
+          final DirectMonotonicWriter writer = DirectMonotonicWriter.getInstance(meta, data, numDocsWithField + 1, DIRECT_MONOTONIC_BLOCK_SHIFT);
+          long addr = 0;
+          writer.add(addr);
+          values = valuesProducer.getBinary(field);
+          for (int doc = values.nextDoc(); doc != DocIdSetIterator.NO_MORE_DOCS; doc = values.nextDoc()) {
+            addr += values.binaryValue().length;
+            writer.add(addr);
+          }
+          writer.finish();
+          meta.writeLong(data.getFilePointer() - start);
+        }
+      }
+    } finally {
+      if (blockWriter != null) {
+        blockWriter.close();
+      }
+    }
   }
 
   @Override

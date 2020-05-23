@@ -37,6 +37,7 @@ import org.apache.lucene.codecs.lucene50.Lucene50StoredFieldsFormat;
 import org.apache.lucene.codecs.lucene50.Lucene50TermVectorsFormat;
 import org.apache.lucene.codecs.lucene60.Lucene60FieldInfosFormat;
 import org.apache.lucene.codecs.lucene60.Lucene60PointsFormat;
+import org.apache.lucene.codecs.lucene80.Lucene80DocValuesFormat;
 import org.apache.lucene.codecs.lucene80.Lucene80NormsFormat;
 import org.apache.lucene.codecs.lucene84.Lucene84PostingsFormat;
 import org.apache.lucene.codecs.perfield.PerFieldDocValuesFormat;
@@ -60,6 +61,7 @@ public class Lucene86Codec extends Codec {
   private final LiveDocsFormat liveDocsFormat = new Lucene50LiveDocsFormat();
   private final CompoundFormat compoundFormat = new Lucene50CompoundFormat();
   private final PostingsFormat defaultFormat;
+  private final DocValuesFormat defaultDVFormat;
 
   private final PostingsFormat postingsFormat = new PerFieldPostingsFormat() {
     @Override
@@ -81,18 +83,39 @@ public class Lucene86Codec extends Codec {
    * Instantiates a new codec.
    */
   public Lucene86Codec() {
-    this(Lucene50StoredFieldsFormat.Mode.BEST_SPEED);
+    this(Lucene50StoredFieldsFormat.Mode.BEST_SPEED, Lucene80DocValuesFormat.Mode.COMPRESSED);
   }
 
   /**
    * Instantiates a new codec, specifying the stored fields compression
    * mode to use.
-   * @param mode stored fields compression mode to use for newly
+   * @param storedFieldsMode stored fields compression mode to use for newly
    *             flushed/merged segments.
    */
-  public Lucene86Codec(Lucene50StoredFieldsFormat.Mode mode) {
+  public Lucene86Codec(Lucene50StoredFieldsFormat.Mode storedFieldsMode) {
+    this(storedFieldsMode, Lucene80DocValuesFormat.Mode.COMPRESSED);
+  }
+
+  /**
+   * Instantiates a new codec, specifying the doc values compression
+   * mode to use.
+   * @param docValuesMode doc values compression mode to use.
+   */
+  public Lucene86Codec(Lucene80DocValuesFormat.Mode docValuesMode) {
+    this(Lucene50StoredFieldsFormat.Mode.BEST_SPEED, docValuesMode);
+  }
+
+  /**
+   * Instantiates a new codec, specifying the stored fields and doc values
+   * compression mode to use.
+   * @param storedFieldsMode stored fields compression mode to use for newly
+   *             flushed/merged segments.
+   * @param docValuesMode doc values compression mode to use.
+   */
+  public Lucene86Codec(Lucene50StoredFieldsFormat.Mode storedFieldsMode, Lucene80DocValuesFormat.Mode docValuesMode) {
     super("Lucene86");
-    this.storedFieldsFormat = new Lucene50StoredFieldsFormat(Objects.requireNonNull(mode));
+    this.storedFieldsFormat = new Lucene50StoredFieldsFormat(Objects.requireNonNull(storedFieldsMode));
+    this.defaultDVFormat = new Lucene80DocValuesFormat(Objects.requireNonNull(docValuesMode));
     this.defaultFormat = new Lucene84PostingsFormat();
   }
 
@@ -166,8 +189,6 @@ public class Lucene86Codec extends Codec {
   public final DocValuesFormat docValuesFormat() {
     return docValuesFormat;
   }
-
-  private final DocValuesFormat defaultDVFormat = DocValuesFormat.forName("Lucene80");
 
   private final NormsFormat normsFormat = new Lucene80NormsFormat();
 

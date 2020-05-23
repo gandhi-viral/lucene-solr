@@ -18,6 +18,7 @@ package org.apache.lucene.codecs.lucene80;
 
 
 import java.io.IOException;
+import java.util.Objects;
 
 import org.apache.lucene.codecs.DocValuesConsumer;
 import org.apache.lucene.codecs.DocValuesFormat;
@@ -131,14 +132,35 @@ import org.apache.lucene.util.packed.DirectWriter;
  */
 public final class Lucene80DocValuesFormat extends DocValuesFormat {
 
-  /** Sole Constructor */
+  private final Mode mode;
+
+  /** Configuration option for doc values format. */
+  public static enum Mode {
+    /** Trade retrieval speed for compression */
+    COMPRESSED,
+    /** Trade compression for retrieval speed.  */
+    UNCOMPRESSED;
+  }
+
+  /** Doc values format with compression enabled by default */
   public Lucene80DocValuesFormat() {
+    this(Mode.COMPRESSED);
+  }
+
+  /** Doc values format with compression mode specified */
+  public Lucene80DocValuesFormat(Mode mode) {
     super("Lucene80");
+    this.mode = Objects.requireNonNull(mode);
   }
 
   @Override
   public DocValuesConsumer fieldsConsumer(SegmentWriteState state) throws IOException {
-    return new Lucene80DocValuesConsumer(state, DATA_CODEC, DATA_EXTENSION, META_CODEC, META_EXTENSION);
+    if (mode == Mode.COMPRESSED) {
+      // Use VERSION_CURRENT to indicate compressed doc values format.
+      return new Lucene80DocValuesConsumer(state, DATA_CODEC, DATA_EXTENSION, META_CODEC, META_EXTENSION, mode, VERSION_CURRENT);
+    } else {
+      return new Lucene80DocValuesConsumer(state, DATA_CODEC, DATA_EXTENSION, META_CODEC, META_EXTENSION, mode, VERSION_START);
+    }
   }
 
   @Override
@@ -151,7 +173,7 @@ public final class Lucene80DocValuesFormat extends DocValuesFormat {
   static final String META_CODEC = "Lucene80DocValuesMetadata";
   static final String META_EXTENSION = "dvm";
   static final int VERSION_START = 0;
-  static final int VERSION_BIN_COMPRESSED = 1;  
+  static final int VERSION_BIN_COMPRESSED = 1;
   static final int VERSION_CURRENT = VERSION_BIN_COMPRESSED;
 
   // indicates docvalues type
