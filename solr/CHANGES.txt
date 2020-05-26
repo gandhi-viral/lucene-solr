@@ -201,6 +201,8 @@ Bug Fixes
 * SOLR-14504: ZkController LiveNodesListener has NullPointerException in startup race.
   (Colvin Cowie via ab)
 
+* SOLR-14498: Upgrade to Caffeine 2.8.4, which fixes the cache poisoning issue. (Jakub Zytka, ab)
+
 Other Changes
 ---------------------
 * SOLR-14197: SolrResourceLoader: marked many methods as deprecated, and in some cases rerouted exiting logic to avoid
@@ -258,6 +260,8 @@ Other Changes
   Erick Erickson)
 
 * SOLR-14495: Fix or suppress warnings in solr/search/function (Erick Erickson)
+
+* SOLR-14280: Improve error reporting in SolrConfig (Andras Salamon via Jason Gerlowski)
 
 ==================  8.5.1 ==================
 
